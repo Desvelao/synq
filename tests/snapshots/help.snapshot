@@ -1,0 +1,19 @@
+synq (0.1.0 - 2025.11.03.18.09)
+Synchronize multiple directories (buckets) using rsync.
+
+If no bucket names are provided, all buckets defined in the configuration
+are synced.
+rsync output is logged to a file if a log_dir is configured in the general block.
+The log file is created as log_dir/rsync_<date>_<bucket>.log.
+
+
+Usage: synq --confg sync.conf [--yes|-y] [--dry-run|-n] [--reverse|-r] [bucket1 bucket2 ...]
+
+Commands:
+    --help, -h                               Display the help.
+    --version                                Display the version.
+    --confg <file>                           Path to the configuration file. Default: SYNC_CONF environment variable or $HOME/.synq/synq.conf
+    --yes or -y                              Skip confirmation prompt.
+    --dry-run or -n                          Run in dry-run mode.
+    --reverse or -r                          Reverse sync (destination becomes source).
+    --verbose or -v                          Enable verbose output.    

@@ -1,0 +1,386 @@
+#!/bin/bash
+script_name="$(basename $0)"
+script_version="0.1.0"
+script_version_date='2025.11.03.18.09'
+script_description="Synchronize multiple directories (buckets) using rsync.
+
+If no bucket names are provided, all buckets defined in the configuration
+are synced.
+rsync output is logged to a file if a "log_dir" is configured in the general block.
+The log file is created as log_dir/rsync_<date>_<bucket>.log.
+"
+script_usage="${script_name} --confg sync.conf [--yes|-y] [--dry-run|-n] [--reverse|-r] [bucket1 bucket2 ...]"
+script_commands="
+    --confg <file>                           Path to the configuration file. Default: SYNC_CONF environment variable or \$HOME/.synq/synq.conf
+    --yes or -y                              Skip confirmation prompt.
+    --dry-run or -n                          Run in dry-run mode.
+    --reverse or -r                          Reverse sync (destination becomes source).
+    --verbose or -v                          Enable verbose output.    
+"
+
+_display_help() {
+  echo -n """${script_name} (${script_version} - ${script_version_date})
+${script_description}
+
+Usage: ${script_usage}
+
+Commands:
+    --help, -h                               Display the help.
+    --version                                Display the version.${script_commands}"""
+  exit 0
+}
+
+_display_version() {
+  echo $script_version
+}
+
+_exit_with_message() {
+  echo "$1" 1>&2
+  exit 1
+}
+
+_question() {
+  read -p "$@" -r
+  echo "$REPLY"
+}
+
+_require_confirmation() {
+  ask_confirmation_response=$(_question "$@. Continue? [Yy/Nn] ")
+
+  case "$ask_confirmation_response" in
+  [Yy]*) return 0 ;;
+  [Nn]*) _exit_with_message "Operation canceled by the user." ;;
+  *) _exit_with_message "Invalid response. Please answer with Y/y or N/n." ;;
+  esac
+}
+
+_ask_confirmation_optional() {
+  ask_confirmation_response=$(_question "$@. Continue? [Yy/Nn] ")
+
+  if [[ $ask_confirmation_response =~ ^[Yy]$ ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+_require_command() {
+  if ! command -v $1 &>/dev/null; then
+    _exit_with_message "$1 command could not be found"
+  fi
+}
+
+# Display help if there are no arguments
+([ "$#" -eq 0 ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]) && _display_help && exit 0
+
+# Display the version
+([ "$1" == "--version" ]) && _display_version && exit 0
+
+# Logic
+
+_require_command rsync
+
+set -e
+shopt -s extglob
+
+# Global associative arrays to hold configuration data.
+declare -A GLOBAL_CONFIG
+declare -A BUCKET_SRC
+declare -A BUCKET_DEST
+declare -A BUCKET_OPTIONS
+
+# -----------------------------------------------------------
+# Parse the configuration file.
+#
+# It parses both a [general] section and multiple [bucket:name]
+# sections. In [general], any key spaces are added to the GLOBAL_CONFIG
+# array. In each bucket section, keys "src", "dest" and "rsync_options"
+# (optional) are stored.
+# -----------------------------------------------------------
+parse_bucket_configs() {
+  local config_file="$1"
+  local current_section=""
+  local current_bucket=""
+
+  if [[ ! -f "$config_file" ]]; then
+    echo "Configuration file not found: $config_file" >&2
+    return 1
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Remove leading/trailing whitespace.
+    line=$(echo "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    # Skip empty lines and comments.
+    if [[ -z "$line" || "$line" =~ ^# ]]; then
+      continue
+    fi
+
+    # Check for a section header.
+    if [[ "$line" =~ ^\[(.*)\]$ ]]; then
+      local section="${BASH_REMATCH[1]}"
+      if [[ "$section" == "general" ]]; then
+        current_section="general"
+        current_bucket=""
+      elif [[ "$section" =~ ^bucket:(.+)$ ]]; then
+        current_section="bucket"
+        current_bucket="${BASH_REMATCH[1]}"
+        # Initialize keys for the bucket.
+        BUCKET_SRC["$current_bucket"]=""
+        BUCKET_DEST["$current_bucket"]=""
+        BUCKET_OPTIONS["$current_bucket"]=""
+      else
+        # Unknown section; reset current context.
+        current_section=""
+        current_bucket=""
+      fi
+      continue
+    fi
+
+    # Process key=value lines.
+    if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+      key=$(echo "${BASH_REMATCH[1]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      value=$(echo "${BASH_REMATCH[2]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      if [[ "$current_section" == "general" ]]; then
+        GLOBAL_CONFIG["$key"]="$value"
+      elif [[ "$current_section" == "bucket" && -n "$current_bucket" ]]; then
+        case "$key" in
+        src)
+          BUCKET_SRC["$current_bucket"]="$value"
+          ;;
+        dest)
+          BUCKET_DEST["$current_bucket"]="$value"
+          ;;
+        rsync_options)
+          BUCKET_OPTIONS["$current_bucket"]="$value"
+          ;;
+        *)
+          echo "Warning: Unknown key '$key' in bucket '$current_bucket'" >&2
+          ;;
+        esac
+      fi
+    else
+      echo "Warning: Skipping malformed line: $line" >&2
+    fi
+  done <"$config_file"
+}
+
+parse_options() {
+  # Process options.
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+    --yes | -y)
+      auto_confirm=true
+      shift
+      ;;
+    --dry-run | -n)
+      dry_run=true
+      shift
+      ;;
+    --reverse | -r)
+      reverse=true
+      shift
+      ;;
+    --config | -c)
+      if [ -z "$2" ]; then
+        _exit_with_message "Error: Missing argument. Please provide the configuration file as the second argument."
+      fi
+      config_file=$2
+      shift 2
+      ;;
+    --verbose | -v)
+      config_file=$2
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+    esac
+  done
+
+  buckets_to_sync=("$@")
+
+}
+
+sync_buckets() {
+  # Fianal list of buckets to sync
+  echo "Buckets to sync: ${buckets_to_sync[*]}"
+
+  # If logging is enabled from the general configuration...
+  local log_dir=""
+  if [[ -n "${GLOBAL_CONFIG[log_dir]}" ]]; then
+    log_dir="${GLOBAL_CONFIG[log_dir]}"
+  fi
+
+  if [[ -n "$log_dir" && ! -d "$log_dir" ]]; then
+    echo "Directory [$log_dir] does not exist"
+
+    local create_log_dir=false
+
+    if ! $auto_confirm; then
+      read -p "Directory [$log_dir] does not exist, do you want to create it? (y/N) " answer
+      if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+        create_log_dir=true
+      fi
+    else
+      create_log_dir=true
+    fi
+
+    echo "create_log_dir $create_log_dir does not exist"
+    if $create_log_dir; then
+      echo "Create [$log_dir] directory"
+      # Ensure the log directory exists.
+      mkdir -p "$log_dir"
+
+      echo "Created [$log_dir] directory"
+    fi
+  fi
+
+  # Process each bucket.
+  for bucket in "${buckets_to_sync[@]}"; do
+    if [[ -z "${BUCKET_SRC[$bucket]}" ]]; then
+      echo "Warning: bucket [$bucket] does not exist in the configuration." >&2
+      continue
+    fi
+
+    # Determine source and destination; reverse if needed.
+    local source="${BUCKET_SRC[$bucket]}"
+    local destination="${BUCKET_DEST[$bucket]}"
+    if $reverse; then
+      local tmp="$source"
+      source="$destination"
+      destination="$tmp"
+    fi
+
+    echo "---------------------------------------------------"
+    echo "Bucket: $bucket"
+    echo "  Source:      $source"
+    echo "  Destination: $destination"
+    if [[ -n "${BUCKET_OPTIONS[$bucket]}" ]]; then
+      echo "  Rsync opts:  ${BUCKET_OPTIONS[$bucket]}"
+    fi
+    if $reverse; then
+      echo "  (Reversed sync: destination -> source)"
+    fi
+    echo "---------------------------------------------------"
+
+    if ! $auto_confirm; then
+      read -p "Sync bucket '$bucket'? (y/N) " answer
+      if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+        echo "Skipping bucket '$bucket'."
+        continue
+      fi
+    fi
+
+    # Build the rsync command.
+    local cmd=(rsync -av)
+    if $dry_run; then
+      cmd+=(--dry-run)
+    fi
+
+    if [[ -n "${BUCKET_OPTIONS[$bucket]}" ]]; then
+      # Split options string into array tokens.
+      read -ra opts <<<"${BUCKET_OPTIONS[$bucket]}"
+      cmd+=("${opts[@]}")
+    fi
+
+    cmd+=("$source" "$destination")
+
+    # Determine log file name if a log directory is provided.
+    local log_file=""
+    if [[ -n "$log_dir" ]]; then
+      # Use a timestamp in the format "YYYYMMDD-HHMMSS".
+      local timestamp
+      timestamp=$(date +'%Y%m%d-%H%M%S')
+      log_file="${log_dir}/rsync_${timestamp}_${bucket}.log"
+    fi
+
+    echo "Executing: ${cmd[*]}"
+    if [[ -n "$log_file" ]]; then
+      echo "Rsync output will be logged to: $log_file"
+      # Pipe output to tee so output is both shown on screen and logged.
+      "${cmd[@]}" 2>&1 | tee "$log_file"
+    else
+      "${cmd[@]}"
+    fi
+    echo
+  done
+}
+
+main() {
+  auto_confirm=false
+  dry_run=false
+  reverse=false
+  buckets_to_sync=()
+  config_file="${SYNC_CONF:-$HOME/.synq/synq.conf}"
+
+  parse_options "$@"
+
+  echo """-------------------------------------------
+Starting $script_name script
+Configuration file: $config_file
+Options:
+  Auto confirm: $auto_confirm
+  Dry run:      $dry_run
+  Reverse:      $reverse
+-------------------------------------------
+"""
+
+  # Parse configuration.
+  parse_bucket_configs "$config_file"
+
+  echo 'Configuration parsed successfully.'
+  echo
+
+  for bucket in "${!BUCKET_SRC[@]}"; do
+    echo "Bucket: $bucket"
+    echo "Source: ${BUCKET_SRC[$bucket]}"
+    echo "Destination: ${BUCKET_DEST[$bucket]}"
+    echo "Rsync Options: ${BUCKET_OPTIONS[$bucket]}"
+    echo
+  done
+
+  if [ ${#buckets_to_sync[@]} -eq 0 ]; then
+    for bucket in "${!BUCKET_SRC[@]}"; do
+      buckets_to_sync+=("$bucket")
+    done
+    echo "No buckets specified; all buckets will be synced."
+  else
+    echo "Buckets to sync: ${buckets_to_sync[*]}"
+    # Create an associative array for fast lookup
+    declare -A lookup
+    for item in "${!BUCKET_SRC[@]}"; do
+      echo $item
+      lookup["$item"]=1
+    done
+
+    echo "lookup to sync: ${lookup[*]}"
+
+    # Filter list2 so it only keeps items present in list1
+    filtered=()
+    for item in "${buckets_to_sync[@]}"; do
+      if [[ -n "${lookup[$item]}" ]]; then
+        filtered+=("$item")
+      else
+        echo "$item is not a valid bucket and will be ignored."
+      fi
+    done
+
+    buckets_to_sync=("${filtered[@]}")
+  fi
+
+  # Start syncing buckets based on provided options and bucket names.
+  sync_buckets
+}
+
+# Execute main if script is run directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

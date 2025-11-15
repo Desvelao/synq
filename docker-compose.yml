@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  synq-test:
+    image: ubuntu:24.04
+    container_name: synq-test
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      'apt-get update -y && \
+      apt-get install -y bash bats curl rsync && \
+      bats tests'

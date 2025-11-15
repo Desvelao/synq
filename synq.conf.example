@@ -1,0 +1,13 @@
+[general]
+log_dir=logs
+
+[bucket:bucket1]
+src=/path/to/src
+dest=/path/to/dest
+rsync_options=
+
+[bucket:bucket2]
+src=/path/to/src2
+dest=/path/to/dest2
+rsync_options=-hz
+
