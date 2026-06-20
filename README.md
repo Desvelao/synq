@@ -8,8 +8,8 @@ This can be as another syncing tool and works ideally for external drives.
 
 ```
 SYNQ_INSTALLATION_DIR=/usr/local/bin/synq
-wget https://github.com/Desvelao/synq/releases/download/v0.2.0-alpha1/synq-0.2.0-alpha1-linux-amd64.tar.gz \
-&& tar -xzf synq-0.2.0-alpha1-linux-amd64.tar.gz \
+wget https://github.com/Desvelao/synq/releases/download/v0.2.0/synq-0.2.0-linux-amd64.tar.gz \
+&& tar -xzf synq-0.2.0-linux-amd64.tar.gz \
 && sudo mv synq "$SYNQ_INSTALLATION_DIR" \
 && chmod +x "$SYNQ_INSTALLATION_DIR"
 ```
@@ -22,7 +22,7 @@ synq --version
 
 Download the configuration example file:
 ```bash
-wget https://raw.githubusercontent.com/Desvelao/synq/refs/tags/v0.2.0-alpha1/synq.yml.example -O $HOME/.synq/synq.yml
+wget https://raw.githubusercontent.com/Desvelao/synq/refs/tags/v0.2.0/synq.yml.example -O $HOME/.synq/synq.yml
 ```
 
 Edit the `$HOME/.synq/synq.yml` example file for your use case.
