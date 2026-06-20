@@ -126,5 +126,5 @@ scripts/test.sh
 Running using Docker:
 
 ```bash
-docker compose -f docker-compose.test.yml up
+docker compose -f docker-compose.build-test.yml up
 ```
