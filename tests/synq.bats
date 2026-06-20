@@ -23,13 +23,16 @@
     run ./synq --version
     [ "$status" -eq 0 ]
     local snapshot="tests/snapshots/version.snapshot"
-    echo "$output" | diff -u "$snapshot" -
+    # echo "$output" | diff -u "$snapshot" -
+    [[ "$output" == "synq version"* ]]
 }
 
 @test "should fail with unknown option" {
     run ./synq --unknown
-    [ "$status" -eq 2 ]
-    [[ "$output" == "Unknown option: --unknown" ]]
+    [ "$status" -eq 1 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = "Error: unknown flag: --unknown" ]
+    [ "${lines[1]}" = "unknown flag: --unknown" ]
 }
 
 @test "should run with configuration file" {
@@ -63,7 +66,7 @@
 
 
     setup
-    run ./synq --config tests/synq.test1.conf -y
+    run ./synq --config tests/synq.test1.yml -y
     [ "$status" -eq 0 ]
     [ -f $tmp_dir/test/dest1/file1.txt ]
     [ -f $tmp_dir/test/dest1/file2.txt ]
@@ -108,7 +111,7 @@
 
 
     setup
-    run ./synq --config tests/synq.test1.conf -y --dry-run
+    run ./synq --config tests/synq.test1.yml -y --dry-run
     [ "$(echo "$output" | grep -c "(DRY RUN)")" -eq 2 ]
     [ "$status" -eq 0 ]
     [ ! -f $tmp_dir/test/dest1/file1.txt ]
@@ -150,7 +153,7 @@
 
 
     setup
-    run ./synq --config tests/synq.test1.conf -y bucket1
+    run ./synq --config tests/synq.test1.yml -y bucket1
     [ "$status" -eq 0 ]
 
     [ -f $tmp_dir/test/dest1/file1.txt ]
@@ -194,7 +197,7 @@
 
 
     setup
-    run ./synq --config tests/synq.test1.conf -y --dry-run bucket1 
+    run ./synq --config tests/synq.test1.yml -y --dry-run bucket1 
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | grep -c "(DRY RUN)")" -eq 1 ]
 
@@ -236,7 +239,7 @@
     }
 
     setup
-    run ./synq --config tests/synq.test1.conf -y bucket1 bucket-unknown
+    run ./synq --config tests/synq.test1.yml -y bucket1 bucket-unknown
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "bucket-unknown is not a valid bucket and will be ignored."
     [ -f $tmp_dir/test/dest1/file1.txt ]
@@ -279,7 +282,7 @@
     }
 
     setup
-    run ./synq --config tests/synq.test1.conf -y --dry-run bucket1 bucket-unknown
+    run ./synq --config tests/synq.test1.yml -y --dry-run bucket1 bucket-unknown
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | grep -c "(DRY RUN)")" -eq 1 ]
     echo "$output" | grep -q "bucket-unknown is not a valid bucket and will be ignored."

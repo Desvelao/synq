@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+
+  builder:
+    image: golang:1.18
+    working_dir: /app
+    environment:
+      - BIN_VERSION=${BIN_VERSION}
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./output:/app/output
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      'rm -rf /app/output/* && \
+      export VERSION=$BIN_VERSION && ./scripts/build.sh && \
+      cp /app/synq /app/output/synq'

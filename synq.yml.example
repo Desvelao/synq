@@ -1,0 +1,8 @@
+log_dir: logs
+buckets:
+  - src: /path/to/src1
+    dest: /path/to/dest1
+    rsync_options: ""
+  - src: /path/to/src2
+    dest: /path/to/dest2
+    rsync_options: -hz

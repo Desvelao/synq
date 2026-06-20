@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+
+  builder:
+    image: golang:1.18
+    working_dir: /app
+    environment:
+      - BIN_VERSION=${BIN_VERSION}
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - shared:/shared
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      'rm -rf /shared/* && \
+      export VERSION=$BIN_VERSION && ./scripts/build.sh && \
+      cp /app/synq /shared/synq'
+  tester:
+    image: ubuntu:24.04
+    working_dir: /app
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    volumes:
+      - shared:/shared
+      - ./tests:/app/tests
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      'apt-get update -y && \
+      apt-get install -y bash bats curl rsync && \
+      cp /shared/synq /app/synq && \
+      bats --print-output-on-failure tests'
+    # entrypoint: ["tail", "-f", "/dev/null"] # uncomment this to dev and comment entrypoint and command above
+
+volumes:
+  shared:
+  
